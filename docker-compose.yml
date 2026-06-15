@@ -1,0 +1,673 @@
+name: fraud-engine
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.3-pg16
+    container_name: fraud-engine-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - fraud-engine-net
+
+  kafka:
+    image: confluentinc/cp-kafka:8.3.0
+    container_name: fraud-engine-kafka
+    hostname: kafka
+    restart: unless-stopped
+    environment:
+      # A stable KRaft cluster ID ensures the persisted metadata remains usable
+      # across container recreation. This identifier is not a credential.
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+
+      # Kafka binds three distinct listeners: controller quorum traffic,
+      # Docker-network client traffic, and traffic forwarded from the host.
+      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:29093,INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+
+      # Advertised listeners are addresses returned to clients in broker
+      # metadata. Containers resolve "kafka" on the bridge network, while
+      # applications running directly on the developer machine use localhost.
+      # Confluent images map KAFKA_ADVERTISED_LISTENERS to Kafka's
+      # advertised.listeners property (other image families may use
+      # KAFKA_CFG_ADVERTISED_LISTENERS for the same Kafka setting).
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+
+      # Internal Kafka topics cannot use the production default replication
+      # factor of three in this intentionally single-node Phase 1 cluster.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-topics --bootstrap-server localhost:29092 --list >/dev/null 2>&1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - fraud-engine-net
+
+  eureka-server:
+    build:
+      context: ./eureka-server
+      dockerfile: Dockerfile
+    image: fraud-engine/eureka-server:phase-1
+    container_name: fraud-engine-eureka-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "${EUREKA_HOST_PORT:-8761}:8761"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "http://localhost:8761/actuator/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - fraud-engine-net
+
+  config-server:
+    build:
+      context: ./config-server
+      dockerfile: Dockerfile
+    image: fraud-engine/config-server:phase-5.5
+    container_name: fraud-engine-config-server
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: ${CONFIG_SERVER_PROFILES:-}
+      CONFIG_REPO_GIT_URI: ${CONFIG_REPO_GIT_URI:?CONFIG_REPO_GIT_URI must be set}
+      CONFIG_REPO_DEFAULT_LABEL: ${CONFIG_REPO_DEFAULT_LABEL:-main}
+      CONFIG_REPO_SEARCH_PATHS: ${CONFIG_REPO_SEARCH_PATHS:-}
+      CONFIG_REPO_USERNAME: ${CONFIG_REPO_USERNAME:-}
+      CONFIG_REPO_PASSWORD: ${CONFIG_REPO_PASSWORD:-}
+      CONFIG_REPO_PRIVATE_KEY: ${CONFIG_REPO_PRIVATE_KEY:-}
+      CONFIG_REPO_PASSPHRASE: ${CONFIG_REPO_PASSPHRASE:-}
+      CONFIG_REPO_STRICT_HOST_KEY_CHECKING: ${CONFIG_REPO_STRICT_HOST_KEY_CHECKING:-false}
+      CONFIG_REPO_HOST_KEY: ${CONFIG_REPO_HOST_KEY:-}
+      CONFIG_REPO_HOST_KEY_ALGORITHM: ${CONFIG_REPO_HOST_KEY_ALGORITHM:-}
+      CONFIG_REPO_PREFERRED_AUTHENTICATIONS: ${CONFIG_REPO_PREFERRED_AUTHENTICATIONS:-publickey}
+      CONFIG_REPO_SKIP_SSL_VALIDATION: ${CONFIG_REPO_SKIP_SSL_VALIDATION:-false}
+      CONFIG_REPO_TIMEOUT_SECONDS: ${CONFIG_REPO_TIMEOUT_SECONDS:-10}
+      CONFIG_REPO_REFRESH_RATE_SECONDS: ${CONFIG_REPO_REFRESH_RATE_SECONDS:-0}
+      EUREKA_DEFAULT_ZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    ports:
+      - "${CONFIG_SERVER_HOST_PORT:-8888}:8888"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "http://localhost:8888/actuator/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - fraud-engine-net
+
+  redis-primary:
+    image: redis:8.2.7-alpine
+    container_name: fraud-engine-redis-primary
+    hostname: redis-primary
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command:
+      - /bin/sh
+      - -ec
+      - >
+        exec redis-server
+        --appendonly yes
+        --appendfsync everysec
+        --requirepass "$$REDIS_PASSWORD"
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - redis-primary-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - fraud-engine-net
+
+  redis-replica-1:
+    image: redis:8.2.7-alpine
+    container_name: fraud-engine-redis-replica-1
+    hostname: redis-replica-1
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command:
+      - /bin/sh
+      - -ec
+      - >
+        exec redis-server
+        --appendonly yes
+        --appendfsync everysec
+        --replicaof redis-primary 6379
+        --masterauth "$$REDIS_PASSWORD"
+        --requirepass "$$REDIS_PASSWORD"
+    depends_on:
+      redis-primary:
+        condition: service_healthy
+    volumes:
+      - redis-replica-1-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - fraud-engine-net
+
+  redis-replica-2:
+    image: redis:8.2.7-alpine
+    container_name: fraud-engine-redis-replica-2
+    hostname: redis-replica-2
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command:
+      - /bin/sh
+      - -ec
+      - >
+        exec redis-server
+        --appendonly yes
+        --appendfsync everysec
+        --replicaof redis-primary 6379
+        --masterauth "$$REDIS_PASSWORD"
+        --requirepass "$$REDIS_PASSWORD"
+    depends_on:
+      redis-primary:
+        condition: service_healthy
+    volumes:
+      - redis-replica-2-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - fraud-engine-net
+
+  redis-sentinel-1:
+    image: redis:8.2.7-alpine
+    container_name: fraud-engine-redis-sentinel-1
+    hostname: redis-sentinel-1
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        cat > /tmp/sentinel.conf <<EOF
+        port 26379
+        sentinel resolve-hostnames yes
+        sentinel announce-hostnames yes
+        sentinel monitor fraud-engine-master redis-primary 6379 2
+        sentinel auth-pass fraud-engine-master $$REDIS_PASSWORD
+        sentinel down-after-milliseconds fraud-engine-master 5000
+        sentinel failover-timeout fraud-engine-master 15000
+        sentinel parallel-syncs fraud-engine-master 1
+        requirepass $$REDIS_PASSWORD
+        EOF
+        exec redis-server /tmp/sentinel.conf --sentinel
+    depends_on:
+      redis-primary:
+        condition: service_healthy
+      redis-replica-1:
+        condition: service_healthy
+      redis-replica-2:
+        condition: service_healthy
+    ports:
+      - "${REDIS_SENTINEL_1_HOST_PORT:-26379}:26379"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -p 26379 -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - fraud-engine-net
+
+  redis-sentinel-2:
+    image: redis:8.2.7-alpine
+    container_name: fraud-engine-redis-sentinel-2
+    hostname: redis-sentinel-2
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        cat > /tmp/sentinel.conf <<EOF
+        port 26379
+        sentinel resolve-hostnames yes
+        sentinel announce-hostnames yes
+        sentinel monitor fraud-engine-master redis-primary 6379 2
+        sentinel auth-pass fraud-engine-master $$REDIS_PASSWORD
+        sentinel down-after-milliseconds fraud-engine-master 5000
+        sentinel failover-timeout fraud-engine-master 15000
+        sentinel parallel-syncs fraud-engine-master 1
+        requirepass $$REDIS_PASSWORD
+        EOF
+        exec redis-server /tmp/sentinel.conf --sentinel
+    depends_on:
+      redis-primary:
+        condition: service_healthy
+      redis-replica-1:
+        condition: service_healthy
+      redis-replica-2:
+        condition: service_healthy
+    ports:
+      - "${REDIS_SENTINEL_2_HOST_PORT:-26380}:26379"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -p 26379 -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - fraud-engine-net
+
+  redis-sentinel-3:
+    image: redis:8.2.7-alpine
+    container_name: fraud-engine-redis-sentinel-3
+    hostname: redis-sentinel-3
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        cat > /tmp/sentinel.conf <<EOF
+        port 26379
+        sentinel resolve-hostnames yes
+        sentinel announce-hostnames yes
+        sentinel monitor fraud-engine-master redis-primary 6379 2
+        sentinel auth-pass fraud-engine-master $$REDIS_PASSWORD
+        sentinel down-after-milliseconds fraud-engine-master 5000
+        sentinel failover-timeout fraud-engine-master 15000
+        sentinel parallel-syncs fraud-engine-master 1
+        requirepass $$REDIS_PASSWORD
+        EOF
+        exec redis-server /tmp/sentinel.conf --sentinel
+    depends_on:
+      redis-primary:
+        condition: service_healthy
+      redis-replica-1:
+        condition: service_healthy
+      redis-replica-2:
+        condition: service_healthy
+    ports:
+      - "${REDIS_SENTINEL_3_HOST_PORT:-26381}:26379"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -p 26379 -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - fraud-engine-net
+
+  tempo:
+    image: grafana/tempo:2.8.2
+    container_name: fraud-engine-tempo
+    restart: unless-stopped
+    command:
+      - -config.file=/etc/tempo/tempo.yml
+    ports:
+      - "${TEMPO_HOST_PORT:-3200}:3200"
+      - "${OTLP_GRPC_HOST_PORT:-4317}:4317"
+      - "${OTLP_HTTP_HOST_PORT:-4318}:4318"
+    volumes:
+      - ./observability/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo-data:/var/tempo
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3200/ready",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - fraud-engine-net
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: fraud-engine-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "${PROMETHEUS_HOST_PORT:-9090}:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      edge-gateway:
+        condition: service_healthy
+      ai-fraud-agent:
+        condition: service_healthy
+      ledger-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9090/-/ready",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - fraud-engine-net
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    container_name: fraud-engine-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${GRAFANA_HOST_PORT:-3000}:3000"
+    volumes:
+      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - fraud-engine-net
+
+  edge-gateway:
+    build:
+      context: ./edge-gateway
+      dockerfile: Dockerfile
+    image: fraud-engine/edge-gateway:phase-2
+    container_name: fraud-engine-edge-gateway
+    restart: unless-stopped
+    environment:
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_DEFAULT_ZONE: http://eureka-server:8761/eureka/
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      REDIS_SENTINEL_NODES: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      PAYMENT_RATE_LIMIT_REPLENISH_RATE: ${PAYMENT_RATE_LIMIT_REPLENISH_RATE:-100}
+      PAYMENT_RATE_LIMIT_BURST_CAPACITY: ${PAYMENT_RATE_LIMIT_BURST_CAPACITY:-200}
+      PAYMENT_RATE_LIMIT_REQUESTED_TOKENS: ${PAYMENT_RATE_LIMIT_REQUESTED_TOKENS:-1}
+      PAYMENT_PUBLISH_TIMEOUT: ${PAYMENT_PUBLISH_TIMEOUT:-12s}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+      TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-1.0}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      redis-sentinel-1:
+        condition: service_healthy
+      redis-sentinel-2:
+        condition: service_healthy
+      redis-sentinel-3:
+        condition: service_healthy
+    ports:
+      - "${EDGE_GATEWAY_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "http://localhost:8080/actuator/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      - fraud-engine-net
+
+  ai-fraud-agent:
+    build:
+      context: ./ai-fraud-agent
+      dockerfile: Dockerfile
+    image: fraud-engine/ai-fraud-agent:phase-4
+    container_name: fraud-engine-ai-fraud-agent
+    restart: unless-stopped
+    environment:
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_PROFILES_ACTIVE: ${AI_FRAUD_AGENT_PROFILES:-mock-ai}
+      EUREKA_DEFAULT_ZONE: http://eureka-server:8761/eureka/
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      JDBC_DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-mock-ai-profile-placeholder}
+      FRAUD_AGENT_KAFKA_GROUP_ID: ${FRAUD_AGENT_KAFKA_GROUP_ID:-fraud-agent-group}
+      FRAUD_AGENT_KAFKA_CONCURRENCY: ${FRAUD_AGENT_KAFKA_CONCURRENCY:-3}
+      FRAUD_AGENT_PROCESSING_LEASE: ${FRAUD_AGENT_PROCESSING_LEASE:-2m}
+      FRAUD_AGENT_DECISION_TIMEOUT: ${FRAUD_AGENT_DECISION_TIMEOUT:-20s}
+      FRAUD_AGENT_PUBLISH_TIMEOUT: ${FRAUD_AGENT_PUBLISH_TIMEOUT:-10s}
+      FRAUD_AGENT_SEED_MOCK_DATA: ${FRAUD_AGENT_SEED_MOCK_DATA:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+      TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-1.0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    ports:
+      - "${AI_FRAUD_AGENT_HOST_PORT:-8082}:8082"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "http://localhost:8082/actuator/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks:
+      - fraud-engine-net
+
+  ledger-service:
+    build:
+      context: ./ledger-service
+      dockerfile: Dockerfile
+    image: fraud-engine/ledger-service:phase-3
+    container_name: fraud-engine-ledger-service
+    restart: unless-stopped
+    environment:
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_DEFAULT_ZONE: http://eureka-server:8761/eureka/
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      JDBC_DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      LEDGER_KAFKA_GROUP_ID: ${LEDGER_KAFKA_GROUP_ID:-ledger-service-group}
+      LEDGER_KAFKA_CONCURRENCY: ${LEDGER_KAFKA_CONCURRENCY:-3}
+      LEDGER_PROCESSING_LEASE: ${LEDGER_PROCESSING_LEASE:-2m}
+      LEDGER_LOCK_TIMEOUT_MS: ${LEDGER_LOCK_TIMEOUT_MS:-5000}
+      LEDGER_QUERY_TIMEOUT_MS: ${LEDGER_QUERY_TIMEOUT_MS:-10000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+      TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-1.0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      ai-fraud-agent:
+        condition: service_healthy
+    ports:
+      - "${LEDGER_SERVICE_HOST_PORT:-8081}:8081"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "http://localhost:8081/actuator/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+    networks:
+      - fraud-engine-net
+
+volumes:
+  postgres-data:
+    name: fraud-engine-postgres-data
+  kafka-data:
+    name: fraud-engine-kafka-data
+  redis-primary-data:
+    name: fraud-engine-redis-primary-data
+  redis-replica-1-data:
+    name: fraud-engine-redis-replica-1-data
+  redis-replica-2-data:
+    name: fraud-engine-redis-replica-2-data
+  tempo-data:
+    name: fraud-engine-tempo-data
+  prometheus-data:
+    name: fraud-engine-prometheus-data
+  grafana-data:
+    name: fraud-engine-grafana-data
+
+networks:
+  fraud-engine-net:
+    name: fraud-engine-net
+    driver: bridge

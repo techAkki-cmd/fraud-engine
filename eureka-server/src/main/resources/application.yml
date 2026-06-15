@@ -1,0 +1,30 @@
+server:
+  port: 8761
+  shutdown: graceful
+
+spring:
+  application:
+    name: fraud-engine-eureka-server
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+eureka:
+  client:
+    # This Phase 1 server is a standalone registry, not a Eureka client.
+    register-with-eureka: false
+    fetch-registry: false
+  server:
+    # Keep self-preservation enabled so transient network partitions do not
+    # cause healthy service registrations to be aggressively evicted.
+    enable-self-preservation: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
