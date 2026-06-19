@@ -1,0 +1,101 @@
+server:
+  port: 8082
+
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: ${FRAUD_AGENT_DB_POOL_SIZE:12}
+      minimum-idle: ${FRAUD_AGENT_DB_MIN_IDLE:2}
+      connection-timeout: 5000
+      validation-timeout: 3000
+  flyway:
+    enabled: true
+    create-schemas: true
+    default-schema: fraud_agent
+    schemas: fraud_agent
+  ai:
+    model:
+      chat: google-genai
+      embedding: google-genai
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY:}
+        chat:
+          options:
+            model: ${GEMINI_CHAT_MODEL:gemini-2.0-flash}
+            response-mime-type: application/json
+            temperature: 0.0
+            max-output-tokens: 512
+        embedding:
+          options:
+            model: ${GEMINI_EMBEDDING_MODEL:text-embedding-004}
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        schema-name: public
+        table-name: fraud_profile_vectors
+        dimensions: 768
+        distance-type: COSINE_DISTANCE
+        index-type: HNSW
+        remove-existing-vector-store-table: false
+        schema-validation: false
+  kafka:
+    consumer:
+      group-id: ${FRAUD_AGENT_KAFKA_GROUP_ID:fraud-agent-group}
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+      max-poll-records: 1
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        isolation.level: read_committed
+        max.poll.interval.ms: ${FRAUD_AGENT_MAX_POLL_INTERVAL_MS:300000}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 15000
+        request.timeout.ms: 5000
+        retries: 2147483647
+    listener:
+      ack-mode: manual_immediate
+      concurrency: ${FRAUD_AGENT_KAFKA_CONCURRENCY:3}
+      immediate-stop: true
+
+app:
+  seed-mock-data: ${FRAUD_AGENT_SEED_MOCK_DATA:false}
+  ai:
+    provider-name: ${FRAUD_AGENT_AI_PROVIDER_NAME:google-genai}
+    decision-timeout: ${FRAUD_AGENT_DECISION_TIMEOUT:20s}
+    publish-timeout: ${FRAUD_AGENT_PUBLISH_TIMEOUT:10s}
+    processing-lease: ${FRAUD_AGENT_PROCESSING_LEASE:2m}
+    max-reasoning-length: ${FRAUD_AGENT_MAX_REASONING_LENGTH:512}
+    vector-top-k: ${FRAUD_AGENT_VECTOR_TOP_K:3}
+
+logging:
+  level:
+    org.springframework.kafka.listener.DefaultErrorHandler: WARN
+    org.apache.kafka.clients.consumer.internals.ConsumerCoordinator: WARN
+
+---
+spring:
+  config:
+    activate:
+      on-profile: mock-ai
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration
+  ai:
+    model:
+      chat: none
+      embedding: none
+    vectorstore:
+      pgvector:
+        initialize-schema: false
+
+app:
+  ai:
+    provider-name: mock-ai

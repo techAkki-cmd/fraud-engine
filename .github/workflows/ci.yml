@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Maven Verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - config-server
+          - edge-gateway
+          - ai-fraud-agent
+          - ledger-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Verify ${{ matrix.service }}
+        working-directory: ${{ matrix.service }}
+        run: mvn --batch-mode --no-transfer-progress clean verify
+
+  docker:
+    name: Compose and Docker Build
+    runs-on: ubuntu-latest
+    needs: verify
+    env:
+      POSTGRES_DB: fraud_engine
+      POSTGRES_USER: fraud_engine_app
+      POSTGRES_PASSWORD: ci_postgres_password
+      REDIS_PASSWORD: ci_redis_password
+      GEMINI_API_KEY: ci_mock_key
+      AI_FRAUD_AGENT_PROFILES: mock-ai
+      CONFIG_REPO_GIT_URI: https://github.com/example/fraud-engine-configs.git
+      CONFIG_REPO_USERNAME: ci-placeholder
+      CONFIG_REPO_PASSWORD: ci-placeholder
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Compose model
+        run: docker compose config --quiet
+
+      - name: Build service images
+        run: docker compose build config-server edge-gateway ai-fraud-agent ledger-service

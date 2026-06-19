@@ -1,0 +1,70 @@
+server:
+  port: 8081
+
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: ${LEDGER_DB_POOL_SIZE:20}
+      minimum-idle: ${LEDGER_DB_MIN_IDLE:2}
+      connection-timeout: 5000
+      validation-timeout: 3000
+  flyway:
+    enabled: true
+    create-schemas: true
+    default-schema: ledger
+    schemas: ledger
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: ledger
+        jdbc:
+          batch_size: 50
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+        query:
+          fail_on_pagination_over_collection_fetch: true
+        generate_statistics: false
+      jakarta:
+        persistence:
+          lock:
+            timeout: ${LEDGER_LOCK_TIMEOUT_MS:5000}
+          query:
+            timeout: ${LEDGER_QUERY_TIMEOUT_MS:10000}
+  kafka:
+    consumer:
+      group-id: ${LEDGER_KAFKA_GROUP_ID:ledger-service-group}
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+      max-poll-records: 1
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        isolation.level: read_committed
+        max.poll.interval.ms: ${LEDGER_MAX_POLL_INTERVAL_MS:300000}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 15000
+        request.timeout.ms: 5000
+        retries: 2147483647
+    listener:
+      ack-mode: manual_immediate
+      concurrency: ${LEDGER_KAFKA_CONCURRENCY:3}
+      immediate-stop: true
+
+fraud-engine:
+  ledger:
+    processing-lease: ${LEDGER_PROCESSING_LEASE:2m}
+
+logging:
+  level:
+    org.apache.kafka.clients.consumer.internals.ConsumerCoordinator: WARN
+    org.springframework.kafka.listener.DefaultErrorHandler: WARN

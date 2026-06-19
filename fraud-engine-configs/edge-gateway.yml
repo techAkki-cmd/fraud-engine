@@ -1,0 +1,60 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    web-application-type: reactive
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  cloud:
+    gateway:
+      routes:
+        - id: payment-ingestion-route
+          uri: forward:///internal/v1/payments
+          predicates:
+            - Path=/api/v1/payments
+            - Method=POST
+          filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@paymentRateLimitKeyResolver}"
+                rate-limiter: "#{@paymentRedisRateLimiter}"
+                status-code: TOO_MANY_REQUESTS
+  data:
+    redis:
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+      connect-timeout: 2s
+      sentinel:
+        master: fraud-engine-master
+        nodes: ${REDIS_SENTINEL_NODES:localhost:26379,localhost:26380,localhost:26381}
+        password: ${REDIS_PASSWORD:}
+  kafka:
+    producer:
+      acks: all
+      compression-type: zstd
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 10000
+        request.timeout.ms: 5000
+        linger.ms: 5
+        batch.size: 32768
+        retries: 2147483647
+
+fraud-engine:
+  rate-limit:
+    replenish-rate: ${PAYMENT_RATE_LIMIT_REPLENISH_RATE:100}
+    burst-capacity: ${PAYMENT_RATE_LIMIT_BURST_CAPACITY:200}
+    requested-tokens: ${PAYMENT_RATE_LIMIT_REQUESTED_TOKENS:1}
+  kafka:
+    publish-timeout: ${PAYMENT_PUBLISH_TIMEOUT:12s}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway,metrics,prometheus
+  endpoint:
+    gateway:
+      access: read_only

@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    stack: fraud-engine-local
+
+scrape_configs:
+  - job_name: edge-gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["edge-gateway:8080"]
+        labels:
+          application: edge-gateway
+
+  - job_name: ai-fraud-agent
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ai-fraud-agent:8082"]
+        labels:
+          application: ai-fraud-agent
+
+  - job_name: ledger-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ledger-service:8081"]
+        labels:
+          application: ledger-service
