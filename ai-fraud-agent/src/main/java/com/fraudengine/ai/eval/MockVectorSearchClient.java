@@ -14,11 +14,11 @@ import org.springframework.stereotype.Component;
 public class MockVectorSearchClient implements VectorSearchClient {
 
     private final List<Document> documents = new CopyOnWriteArrayList<>(List.of(
-            new Document("Rapid successive transfers from a newly created digital wallet",
-                    Map.of("scenario", "velocity", "severity", "high", "expected_decision", "FRAUD")),
-            new Document("Unusual high-value transfer to a first-time merchant from a dormant account",
-                    Map.of("scenario", "account_takeover", "severity", "high", "expected_decision", "FRAUD")),
-            new Document("Normal recurring bill payment from established account to known merchant",
+            new Document("Rapid UPI transfers from a newly created wallet to unrelated beneficiaries",
+                    Map.of("scenario", "velocity", "severity", "high", "expected_decision", "BLOCK")),
+            new Document("Unusual high-value payout from a dormant salary account to a first-time mule account",
+                    Map.of("scenario", "account_takeover", "severity", "high", "expected_decision", "BLOCK")),
+            new Document("Normal UPI grocery payment from an established account to a known kirana merchant",
                     Map.of("scenario", "routine", "severity", "low", "expected_decision", "SAFE"))));
 
     @Override

@@ -9,64 +9,78 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fraudengine.ai.decision.FraudDecision;
 import com.fraudengine.ai.decision.FraudEvaluationResult;
 import com.fraudengine.ai.payment.PaymentPayload;
+import com.fraudengine.ai.risk.RiskProfile;
+import com.fraudengine.ai.risk.RiskScoringEngine;
 import com.fraudengine.ai.support.RetryableFraudEvaluationException;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class FraudEvaluationService {
 
+    private static final Logger log = LoggerFactory.getLogger(FraudEvaluationService.class);
+
     private static final String SYSTEM_PROMPT = """
-            You are a senior financial risk assessor for a core banking payment integrity system.
-            Evaluate only the provided transaction and similar historical records.
+            You are a senior financial risk analyst for a core banking payment integrity system.
+            A deterministic Java rules engine has already made the final routing decision.
+            Your job is explanation only: summarize why the fixed decision was made from the provided
+            triggered rules and similar historical records.
             Return only strict JSON with this exact schema:
-            {"decision":"SAFE|FRAUD","reasoning":"short operational reason"}
+            {"reasoning":"short operational reason"}
             Do not include markdown, code fences, extra keys, comments, or prose outside JSON.
-            Choose FRAUD when the transaction resembles high-risk historical scenarios or contains unusual risk signals.
-            Choose SAFE only when risk indicators are weak or absent.
+            Do not include or infer a decision field. Do not contradict the fixed rules-engine decision.
             """;
 
+    private final RiskScoringEngine riskScoringEngine;
     private final VectorSearchClient vectorSearchClient;
     private final FraudAiClient fraudAiClient;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final String modelName;
+    private final boolean modelCallEnabled;
     private final int topK;
     private final int maxReasoningLength;
 
     public FraudEvaluationService(
+            RiskScoringEngine riskScoringEngine,
             VectorSearchClient vectorSearchClient,
             FraudAiClient fraudAiClient,
             ObjectMapper objectMapper,
             Clock clock,
             @Value("${app.ai.provider-name}") String modelName,
+            @Value("${app.ai.model-call-enabled:true}") boolean modelCallEnabled,
             @Value("${app.ai.vector-top-k:3}") int topK,
             @Value("${app.ai.max-reasoning-length:512}") int maxReasoningLength,
             @Value("${app.ai.decision-timeout:20s}") Duration decisionTimeout) {
+        this.riskScoringEngine = riskScoringEngine;
         this.vectorSearchClient = vectorSearchClient;
         this.fraudAiClient = fraudAiClient;
         this.objectMapper = objectMapper.copy()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
         this.clock = clock;
         this.modelName = modelName;
+        this.modelCallEnabled = modelCallEnabled;
         this.topK = topK;
         this.maxReasoningLength = maxReasoningLength;
     }
 
     public FraudEvaluationResult evaluate(PaymentPayload payment) {
+        RiskProfile riskProfile = riskScoringEngine.score(payment);
         String context = buildContext(payment);
         List<Document> similarDocuments = searchSimilarProfiles(context);
         String vectorSummary = summarize(similarDocuments);
-        String userPrompt = buildUserPrompt(payment, context, vectorSummary);
-        String content = callModel(userPrompt);
-        ParsedDecision parsedDecision = parseDecision(content);
+        String userPrompt = buildUserPrompt(payment, riskProfile, context, vectorSummary);
+        ParsedReasoning parsedReasoning = explainWithModel(payment, riskProfile, userPrompt);
         return new FraudEvaluationResult(
-                parsedDecision.decision(),
-                parsedDecision.reasoning(),
+                riskProfile.decision(),
+                riskProfile.totalScore(),
+                riskProfile.triggeredRules(),
+                parsedReasoning.reasoning(),
                 modelName,
                 vectorSummary,
                 clock.instant());
@@ -88,43 +102,57 @@ public class FraudEvaluationService {
         try {
             return vectorSearchClient.similarFraudProfiles(context, topK);
         } catch (RuntimeException exception) {
-            throw new RetryableFraudEvaluationException("Vector similarity search failed", exception);
+            log.warn("Vector similarity search failed; continuing with deterministic risk rules", exception);
+            return List.of();
         }
     }
 
-    private String callModel(String userPrompt) {
+    private ParsedReasoning explainWithModel(PaymentPayload payment, RiskProfile riskProfile, String userPrompt) {
+        if (!modelCallEnabled) {
+            return new ParsedReasoning(fallbackReasoning(riskProfile));
+        }
         try {
-            return fraudAiClient.complete(SYSTEM_PROMPT, userPrompt);
+            String content = fraudAiClient.complete(SYSTEM_PROMPT, userPrompt);
+            return parseReasoning(content);
         } catch (RuntimeException exception) {
-            throw new RetryableFraudEvaluationException("Gemini fraud decision call failed", exception);
+            log.warn(
+                    "AI explanation failed for paymentId={}; publishing deterministic {} decision",
+                    payment.paymentId(),
+                    riskProfile.decision(),
+                    exception);
+            return new ParsedReasoning(fallbackReasoning(riskProfile));
         }
     }
 
-    private ParsedDecision parseDecision(String rawContent) {
+    private ParsedReasoning parseReasoning(String rawContent) {
         if (rawContent == null || rawContent.isBlank()) {
-            throw new RetryableFraudEvaluationException("Gemini returned an empty decision");
+            throw new RetryableFraudEvaluationException("Gemini returned an empty reasoning response");
         }
         try {
-            ParsedDecision decision = objectMapper.readValue(rawContent.trim(), ParsedDecision.class);
-            if (decision.decision() == null) {
-                throw new RetryableFraudEvaluationException("Gemini decision is missing");
-            }
-            if (decision.reasoning() == null || decision.reasoning().isBlank()) {
+            ParsedReasoning response = objectMapper.readValue(rawContent.trim(), ParsedReasoning.class);
+            if (response.reasoning() == null || response.reasoning().isBlank()) {
                 throw new RetryableFraudEvaluationException("Gemini reasoning is missing");
             }
-            if (decision.reasoning().length() > maxReasoningLength) {
+            if (response.reasoning().length() > maxReasoningLength) {
                 throw new RetryableFraudEvaluationException("Gemini reasoning exceeds configured length");
             }
-            return new ParsedDecision(
-                    decision.decision(),
-                    decision.reasoning().replaceAll("\\s+", " ").trim());
+            return new ParsedReasoning(response.reasoning().replaceAll("\\s+", " ").trim());
         } catch (JsonProcessingException exception) {
             throw new RetryableFraudEvaluationException("Gemini returned malformed JSON", exception);
         }
     }
 
-    private static String buildUserPrompt(PaymentPayload payment, String context, String vectorSummary) {
+    private static String buildUserPrompt(
+            PaymentPayload payment,
+            RiskProfile riskProfile,
+            String context,
+            String vectorSummary) {
         return """
+                Fixed rules-engine decision:
+                decision=%s
+                riskScore=%d
+                triggeredRules=%s
+
                 Current transaction:
                 paymentId=%s
                 sourceAccountId=%s
@@ -140,6 +168,9 @@ public class FraudEvaluationService {
                 Top similar historical records:
                 %s
                 """.formatted(
+                riskProfile.decision(),
+                riskProfile.totalScore(),
+                riskProfile.triggeredRules().isEmpty() ? "[]" : riskProfile.triggeredRules(),
                 payment.paymentId(),
                 payment.accountId(),
                 payment.destinationAccountId(),
@@ -172,6 +203,14 @@ public class FraudEvaluationService {
         return value.length() <= maxLength ? value : value.substring(0, maxLength - 3) + "...";
     }
 
-    public record ParsedDecision(FraudDecision decision, String reasoning) {
+    private static String fallbackReasoning(RiskProfile riskProfile) {
+        String rules = riskProfile.triggeredRules().isEmpty()
+                ? "no high-risk rules were triggered"
+                : String.join("; ", riskProfile.triggeredRules());
+        return "Deterministic risk rules produced a %s decision with score %d because %s. AI explanation is temporarily unavailable."
+                .formatted(riskProfile.decision(), riskProfile.totalScore(), bounded(rules, 320));
+    }
+
+    public record ParsedReasoning(String reasoning) {
     }
 }

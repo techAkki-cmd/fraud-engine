@@ -22,15 +22,15 @@ public class FraudProfileSeeder implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         vectorSearchClient.add(List.of(
-                new Document("Rapid successive transfers from a newly created digital wallet to unrelated merchants",
-                        Map.of("scenario", "digital_wallet_velocity", "severity", "high", "expected_decision", "FRAUD")),
-                new Document("Large first-time cross-account transfer after a dormant account suddenly becomes active",
-                        Map.of("scenario", "dormant_account_takeover", "severity", "high", "expected_decision", "FRAUD")),
-                new Document("Multiple failed card attempts followed by a successful high-value transfer",
-                        Map.of("scenario", "credential_stuffing", "severity", "high", "expected_decision", "FRAUD")),
-                new Document("ACH transfer to a known payroll beneficiary from a long-tenured account",
+                new Document("Rapid UPI transfers from a newly created wallet to unrelated beneficiaries",
+                        Map.of("scenario", "digital_wallet_velocity", "severity", "high", "expected_decision", "BLOCK")),
+                new Document("Large first-time IMPS transfer after a dormant salary account suddenly becomes active",
+                        Map.of("scenario", "dormant_account_takeover", "severity", "high", "expected_decision", "BLOCK")),
+                new Document("Multiple failed card attempts followed by a successful high-value INR transfer",
+                        Map.of("scenario", "credential_stuffing", "severity", "high", "expected_decision", "BLOCK")),
+                new Document("NEFT transfer to a known salary beneficiary from a long-tenured account",
                         Map.of("scenario", "known_beneficiary", "severity", "low", "expected_decision", "SAFE")),
-                new Document("Small recurring merchant payment consistent with prior account behavior",
+                new Document("Small recurring UPI payment to a local kirana merchant consistent with prior account behavior",
                         Map.of("scenario", "recurring_payment", "severity", "low", "expected_decision", "SAFE"))));
     }
 }

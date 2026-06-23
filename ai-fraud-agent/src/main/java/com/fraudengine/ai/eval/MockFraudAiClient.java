@@ -10,14 +10,18 @@ public class MockFraudAiClient implements FraudAiClient {
     @Override
     public String complete(String systemPrompt, String userPrompt) {
         String normalized = userPrompt.toLowerCase();
-        if (normalized.contains("paymentmethod=digital_wallet")
-                || normalized.matches("(?s).*amount=[A-Z]{3}\\s+(9[0-9]{3,}|[1-9][0-9]{4,})\\.[0-9]{2}.*")) {
+        if (normalized.contains("decision=block")) {
             return """
-                    {"decision":"FRAUD","reasoning":"Mock policy flagged high-risk digital wallet or fraud-like transaction context."}
+                    {"reasoning":"Rules-based blocking was triggered by stacked high-risk signals such as UPI velocity, mule-account destination risk, or unusual INR payment context."}
+                    """;
+        }
+        if (normalized.contains("decision=review")) {
+            return """
+                    {"reasoning":"Rules-based review was triggered by moderate India-market risk signals that require step-up verification before ledger posting."}
                     """;
         }
         return """
-                {"decision":"SAFE","reasoning":"Mock policy found no high-risk fraud indicators in the payment context."}
+                {"reasoning":"Rules-based scoring found only familiar low-risk payment indicators, so the INR payment can proceed to ledger posting."}
                 """;
     }
 }
