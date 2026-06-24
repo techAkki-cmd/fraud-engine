@@ -1,7 +1,6 @@
 # Agentic Payment Integrity & Fraud Engine
 
-* **Live Demo URL:** add deployment link when the local stack is exposed for review.
-* **Demo Video Link:** add walkthrough link when recorded.
+* **Demo Video Link:** (https://www.loom.com/share/a65961c983184b1194ffeca8eaffff33)
 * **Primary UI:** `http://localhost:3001` after the Docker Compose stack is running.
 
 > **Operational Note for Reviewers:** This project is designed to run as a full local fintech stack. The dashboard, Gateway, Kafka, Keycloak, Vault, PostgreSQL, Redis, Config Server, AI fraud agent, ledger service, Prometheus, Grafana, and Tempo all come up through Docker Compose. Gemini can be enabled for production-style explanation generation, but the fraud decision itself remains deterministic and auditable.
@@ -155,9 +154,7 @@ Use `PRODUCTION_LOCAL_RUNBOOK.md` when you want the real Gemini provider enabled
 - `docs/HIGH_AVAILABILITY_DR.md` outlines a realistic AWS production topology and failover approach.
 - `PRODUCTION_LOCAL_RUNBOOK.md` shows how to run the local stack with real Gemini explanations.
 
-## What I Used AI For
 
-I used AI assistance for implementation acceleration and review: service scaffolding, UI shaping, README polishing, risk-scenario wording, test ideas, and debugging support from logs. The important system choices are explicit in the code: deterministic risk authority, Kafka event boundaries, ledger idempotency, audit immutability, Vault-backed configuration, and the dashboard's live analyst workflow.
 
 ## What I Would Change With 4 More Weeks
 
