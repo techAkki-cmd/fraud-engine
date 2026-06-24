@@ -94,6 +94,8 @@ public class FraudDecisionRepository {
                 update fraud_agent.fraud_decisions
                 set status = 'COMPLETED',
                     decision = ?,
+                    risk_score = ?,
+                    rules_triggered = ?,
                     reasoning = ?,
                     model = ?,
                     vector_matches = ?,
@@ -102,6 +104,8 @@ public class FraudDecisionRepository {
                   and status = 'PROCESSING'
                 """,
                 result.decision().name(),
+                result.riskScore(),
+                String.join("\n", result.rulesTriggered()),
                 result.reasoning(),
                 result.model(),
                 result.vectorMatches(),
@@ -124,7 +128,7 @@ public class FraudDecisionRepository {
     private Optional<FraudDecisionRow> findRow(UUID paymentId) {
         try {
             return Optional.ofNullable(jdbcTemplate.queryForObject("""
-                    select payment_id, status, decision, reasoning, model, vector_matches, updated_at
+                    select payment_id, status, decision, risk_score, rules_triggered, reasoning, model, vector_matches, updated_at
                     from fraud_agent.fraud_decisions
                     where payment_id = ?
                     """, this::mapRow, paymentId));
@@ -139,6 +143,8 @@ public class FraudDecisionRepository {
                 rs.getObject("payment_id", UUID.class),
                 FraudDecisionStatus.valueOf(rs.getString("status")),
                 decision == null ? null : FraudDecision.valueOf(decision),
+                rs.getObject("risk_score", Integer.class),
+                rs.getString("rules_triggered"),
                 rs.getString("reasoning"),
                 rs.getString("model"),
                 rs.getString("vector_matches"),
@@ -149,13 +155,24 @@ public class FraudDecisionRepository {
             UUID paymentId,
             FraudDecisionStatus status,
             FraudDecision decision,
+            Integer riskScore,
+            String rulesTriggered,
             String reasoning,
             String model,
             String vectorMatches,
             Instant updatedAt) {
 
         FraudEvaluationResult toResult() {
-            return new FraudEvaluationResult(decision, reasoning, model, vectorMatches, updatedAt);
+            return new FraudEvaluationResult(
+                    decision,
+                    riskScore == null ? 0 : riskScore,
+                    rulesTriggered == null || rulesTriggered.isBlank()
+                            ? java.util.List.of()
+                            : java.util.Arrays.stream(rulesTriggered.split("\\R")).toList(),
+                    reasoning,
+                    model,
+                    vectorMatches,
+                    updatedAt);
         }
     }
 }

@@ -26,16 +26,19 @@ public class TransactionalLedgerService implements LedgerService {
     private final AccountRepository accountRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
     private final PaymentClaimService claimService;
+    private final AuditContext auditContext;
     private final Clock clock;
 
     public TransactionalLedgerService(
             AccountRepository accountRepository,
             LedgerEntryRepository ledgerEntryRepository,
             PaymentClaimService claimService,
+            AuditContext auditContext,
             Clock clock) {
         this.accountRepository = accountRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.claimService = claimService;
+        this.auditContext = auditContext;
         this.clock = clock;
     }
 
@@ -85,6 +88,7 @@ public class TransactionalLedgerService implements LedgerService {
                     "Source account has insufficient funds");
         }
 
+        auditContext.paymentMutation(payment.paymentId(), "ledger-service");
         source.debit(amount);
         destination.credit(amount);
         ledgerEntryRepository.save(LedgerEntry.success(

@@ -34,6 +34,20 @@ class PaymentEventDecoderTests {
     }
 
     @Test
+    void decodesSchemaV3RiskContext() {
+        ConsumerRecord<String, String> record = validRecord(validJsonWithRiskContext());
+        record.headers().remove("schema-version");
+        record.headers().add("schema-version", bytes("3"));
+
+        DecodedPayment decoded = decoder.decode(record);
+
+        assertThat(decoded.payment().riskContext()).isNotNull();
+        assertThat(decoded.payment().riskContext().destinationPreviouslyFlagged()).isTrue();
+        assertThat(decoded.payment().riskContext().deviceFingerprintRisk())
+                .isEqualTo(PaymentPayload.DeviceFingerprintRisk.HIGH);
+    }
+
+    @Test
     void rejectsSchemaV1BeforeParsingPayload() {
         ConsumerRecord<String, String> record = validRecord();
         record.headers().remove("schema-version");
@@ -62,7 +76,7 @@ class PaymentEventDecoderTests {
 
         assertThatThrownBy(() -> decoder.decode(record))
                 .isInstanceOf(ContractValidationException.class)
-                .hasMessageContaining("schema-v2 JSON");
+                .hasMessageContaining("schema-v2/v3 JSON");
     }
 
     @Test
@@ -112,6 +126,30 @@ class PaymentEventDecoderTests {
                   "currency": "USD",
                   "paymentMethod": "CARD",
                   "occurredAt": "2024-01-01T00:00:00Z"
+                }
+                """;
+    }
+
+    private String validJsonWithRiskContext() {
+        return """
+                {
+                  "paymentId":"11111111-1111-1111-1111-111111111111",
+                  "accountId":"acct-source",
+                  "destinationAccountId":"acct-destination",
+                  "merchantId":"merchant-42",
+                  "amount": "125.25",
+                  "currency": "USD",
+                  "paymentMethod": "CARD",
+                  "occurredAt": "2024-01-01T00:00:00Z",
+                  "riskContext": {
+                    "amountToMedianRatio": 7.25,
+                    "paymentAttemptsLast10Minutes": 8,
+                    "ipGeoDistanceKmFromUsual": 3480,
+                    "destinationAccountAgeDays": 1,
+                    "destinationPreviouslyFlagged": true,
+                    "deviceFingerprintRisk": "HIGH",
+                    "merchantEstablishedLowRisk": false
+                  }
                 }
                 """;
     }

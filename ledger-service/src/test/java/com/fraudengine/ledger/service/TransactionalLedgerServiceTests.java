@@ -34,6 +34,7 @@ class TransactionalLedgerServiceTests {
     private AccountRepository accountRepository;
     private LedgerEntryRepository ledgerEntryRepository;
     private PaymentClaimService claimService;
+    private AuditContext auditContext;
     private TransactionalLedgerService service;
 
     @BeforeEach
@@ -41,10 +42,12 @@ class TransactionalLedgerServiceTests {
         accountRepository = mock(AccountRepository.class);
         ledgerEntryRepository = mock(LedgerEntryRepository.class);
         claimService = mock(PaymentClaimService.class);
+        auditContext = mock(AuditContext.class);
         service = new TransactionalLedgerService(
                 accountRepository,
                 ledgerEntryRepository,
                 claimService,
+                auditContext,
                 Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC));
     }
 
@@ -61,6 +64,7 @@ class TransactionalLedgerServiceTests {
 
         assertThat(source.getBalance()).isEqualByComparingTo("90.00");
         assertThat(destination.getBalance()).isEqualByComparingTo("35.00");
+        verify(auditContext).paymentMutation(payment.paymentId(), "ledger-service");
         verify(claimService).completeOwnedClaim(claim);
         ArgumentCaptor<LedgerEntry> entryCaptor = ArgumentCaptor.forClass(LedgerEntry.class);
         verify(ledgerEntryRepository).save(entryCaptor.capture());
@@ -119,6 +123,7 @@ class TransactionalLedgerServiceTests {
                 new BigDecimal(amount),
                 "USD",
                 PaymentMethod.BANK_TRANSFER,
-                Instant.parse("2025-12-31T23:59:00Z"));
+                Instant.parse("2025-12-31T23:59:00Z"),
+                null);
     }
 }

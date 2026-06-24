@@ -93,6 +93,7 @@ class PaymentIngestionControllerTests {
                 new BigDecimal("125.50"),
                 "USD",
                 PaymentMethod.CARD,
-                Instant.now().minusSeconds(1));
+                Instant.now().minusSeconds(1),
+                null);
     }
 }

@@ -34,6 +34,18 @@ class PaymentEventDecoderTests {
     }
 
     @Test
+    void decodesSchemaVersionThreeEventWithRiskContextButLedgerIgnoresIt() {
+        UUID paymentId = UUID.randomUUID();
+        ConsumerRecord<String, String> record = record(paymentId, "3", validJsonWithRiskContext(paymentId));
+
+        DecodedPayment decoded = decoder.decode(record);
+
+        assertThat(decoded.payment().paymentId()).isEqualTo(paymentId);
+        assertThat(decoded.payment().riskContext()).isNotNull();
+        assertThat(decoded.payment().riskContext().merchantEstablishedLowRisk()).isTrue();
+    }
+
+    @Test
     void rejectsLegacySchemaVersionOneEvents() {
         UUID paymentId = UUID.randomUUID();
 
@@ -86,6 +98,33 @@ class PaymentEventDecoderTests {
                   "currency": "USD",
                   "paymentMethod": "CARD",
                   "occurredAt": "%s"
+                }
+                """.formatted(
+                paymentId,
+                new BigDecimal("25.50").toPlainString(),
+                Instant.now().minusSeconds(1));
+    }
+
+    private static String validJsonWithRiskContext(UUID paymentId) {
+        return """
+                {
+                  "paymentId": "%s",
+                  "accountId": "account-1",
+                  "destinationAccountId": "account-2",
+                  "merchantId": "merchant-1",
+                  "amount": %s,
+                  "currency": "USD",
+                  "paymentMethod": "CARD",
+                  "occurredAt": "%s",
+                  "riskContext": {
+                    "amountToMedianRatio": 1.05,
+                    "paymentAttemptsLast10Minutes": 1,
+                    "ipGeoDistanceKmFromUsual": 12,
+                    "destinationAccountAgeDays": 720,
+                    "destinationPreviouslyFlagged": false,
+                    "deviceFingerprintRisk": "LOW",
+                    "merchantEstablishedLowRisk": true
+                  }
                 }
                 """.formatted(
                 paymentId,

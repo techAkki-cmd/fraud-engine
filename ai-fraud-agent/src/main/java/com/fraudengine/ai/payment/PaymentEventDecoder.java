@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class PaymentEventDecoder {
 
-    static final String EXPECTED_SCHEMA_VERSION = "2";
+    static final Set<String> SUPPORTED_SCHEMA_VERSIONS = Set.of("2", "3");
     static final String EXPECTED_EVENT_TYPE = "PAYMENT_INGESTED";
 
     private final ObjectReader paymentReader;
@@ -32,7 +32,7 @@ public class PaymentEventDecoder {
     }
 
     public DecodedPayment decode(ConsumerRecord<String, String> record) {
-        requireHeader(record, "schema-version", EXPECTED_SCHEMA_VERSION);
+        requireOneOfHeader(record, "schema-version", SUPPORTED_SCHEMA_VERSIONS);
         requireHeader(record, "event-type", EXPECTED_EVENT_TYPE);
         String correlationId = requiredHeader(record, "correlation-id");
         if (correlationId.length() > 128) {
@@ -54,7 +54,7 @@ public class PaymentEventDecoder {
         try {
             return paymentReader.readValue(value);
         } catch (JsonProcessingException exception) {
-            throw new ContractValidationException("Payment event is not valid schema-v2 JSON", exception);
+            throw new ContractValidationException("Payment event is not valid schema-v2/v3 JSON", exception);
         }
     }
 
@@ -78,6 +78,17 @@ public class PaymentEventDecoder {
         if (!expectedValue.equals(actual)) {
             throw new ContractValidationException(
                     "%s must be '%s' but was '%s'".formatted(name, expectedValue, actual));
+        }
+    }
+
+    private static void requireOneOfHeader(
+            ConsumerRecord<String, String> record,
+            String name,
+            Set<String> expectedValues) {
+        String actual = requiredHeader(record, name);
+        if (!expectedValues.contains(actual)) {
+            throw new ContractValidationException(
+                    "%s must be one of %s but was '%s'".formatted(name, expectedValues, actual));
         }
     }
 

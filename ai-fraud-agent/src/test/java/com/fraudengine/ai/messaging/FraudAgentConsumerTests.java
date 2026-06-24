@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import com.fraudengine.ai.decision.DecisionClaim;
@@ -51,7 +52,7 @@ class FraudAgentConsumerTests {
         FraudAgentConsumer consumer = new FraudAgentConsumer(decoder, repository, service, publisher);
         ConsumerRecord<String, String> record = record();
         DecodedPayment decoded = new DecodedPayment(payment(), "corr-123");
-        FraudEvaluationResult result = result(FraudDecision.FRAUD);
+        FraudEvaluationResult result = result(FraudDecision.BLOCK);
         when(decoder.decode(record)).thenReturn(decoded);
         when(repository.claim(payment().paymentId(), "corr-123", record))
                 .thenReturn(DecisionClaim.completed(payment().paymentId(), result));
@@ -77,12 +78,15 @@ class FraudAgentConsumerTests {
                 new BigDecimal("125.25"),
                 "USD",
                 PaymentMethod.CARD,
-                Instant.parse("2024-01-01T00:00:00Z"));
+                Instant.parse("2024-01-01T00:00:00Z"),
+                null);
     }
 
     private static FraudEvaluationResult result(FraudDecision decision) {
         return new FraudEvaluationResult(
                 decision,
+                decision == FraudDecision.SAFE ? 0 : 90,
+                decision == FraudDecision.SAFE ? List.of() : List.of("+50 flagged destination"),
                 "reason",
                 "mock-ai",
                 "matches",

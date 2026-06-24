@@ -31,7 +31,8 @@ class PaymentRequestValidationTests {
                 new BigDecimal("0.001"),
                 "usd",
                 PaymentMethod.CARD,
-                Instant.now().plusSeconds(60));
+                Instant.now().plusSeconds(60),
+                null);
 
         assertThat(validator.validate(request))
                 .extracting(violation -> violation.getPropertyPath().toString())
@@ -47,6 +48,7 @@ class PaymentRequestValidationTests {
                 new BigDecimal("125.50"),
                 "USD",
                 PaymentMethod.CARD,
-                Instant.now().minusSeconds(1));
+                Instant.now().minusSeconds(1),
+                null);
     }
 }

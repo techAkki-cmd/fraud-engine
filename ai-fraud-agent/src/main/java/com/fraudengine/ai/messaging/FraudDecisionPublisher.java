@@ -22,6 +22,7 @@ import org.springframework.stereotype.Component;
 public class FraudDecisionPublisher {
 
     private static final int MAX_REASON_HEADER_BYTES = 512;
+    private static final int MAX_RULES_HEADER_BYTES = 1024;
     private static final int MAX_VECTOR_HEADER_BYTES = 1024;
 
     private final KafkaTemplate<String, String> kafkaTemplate;
@@ -37,7 +38,8 @@ public class FraudDecisionPublisher {
     public void publish(ConsumerRecord<String, String> sourceRecord, DecodedPayment decodedPayment, FraudEvaluationResult result) {
         String targetTopic = switch (result.decision()) {
             case SAFE -> PaymentTopics.PAYMENT_CLEARED;
-            case FRAUD -> PaymentTopics.PAYMENT_BLOCKED;
+            case REVIEW -> PaymentTopics.PAYMENT_REVIEW;
+            case BLOCK -> PaymentTopics.PAYMENT_BLOCKED;
         };
 
         ProducerRecord<String, String> producerRecord = new ProducerRecord<>(
@@ -51,6 +53,8 @@ public class FraudDecisionPublisher {
         copyHeaderIfPresent(sourceRecord, producerRecord, "event-type");
         copyHeaderIfPresent(sourceRecord, producerRecord, "ingested-at");
         addHeader(producerRecord, "fraud-decision", result.decision().name());
+        addHeader(producerRecord, "risk-score", Integer.toString(result.riskScore()));
+        addHeader(producerRecord, "risk-rules", bounded(String.join(" | ", result.rulesTriggered()), MAX_RULES_HEADER_BYTES));
         addHeader(producerRecord, "fraud-reason", bounded(result.reasoning(), MAX_REASON_HEADER_BYTES));
         addHeader(producerRecord, "fraud-model", result.model());
         addHeader(producerRecord, "fraud-evaluated-at", DateTimeFormatter.ISO_INSTANT.format(result.evaluatedAt()));

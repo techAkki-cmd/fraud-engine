@@ -107,6 +107,7 @@ class PaymentConsumerTests {
                 new BigDecimal("25.50"),
                 "USD",
                 PaymentMethod.CARD,
-                Instant.now().minusSeconds(1));
+                Instant.now().minusSeconds(1),
+                null);
     }
 }

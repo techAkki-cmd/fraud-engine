@@ -37,4 +37,28 @@ public class KafkaProducerConfig {
                 .replicas(1)
                 .build();
     }
+
+    @Bean
+    NewTopic paymentClearedTopic() {
+        return TopicBuilder.name(PaymentTopics.PAYMENT_CLEARED)
+                .partitions(12)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    NewTopic paymentReviewTopic() {
+        return TopicBuilder.name(PaymentTopics.PAYMENT_REVIEW)
+                .partitions(12)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    NewTopic paymentBlockedTopic() {
+        return TopicBuilder.name(PaymentTopics.PAYMENT_BLOCKED)
+                .partitions(12)
+                .replicas(1)
+                .build();
+    }
 }

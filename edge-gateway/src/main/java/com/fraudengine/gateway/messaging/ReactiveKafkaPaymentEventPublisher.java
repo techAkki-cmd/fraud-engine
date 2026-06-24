@@ -19,7 +19,8 @@ import reactor.core.publisher.Mono;
 @Component
 public class ReactiveKafkaPaymentEventPublisher implements PaymentEventPublisher {
 
-    private static final String SCHEMA_VERSION = "2";
+    private static final String SCHEMA_VERSION_V2 = "2";
+    private static final String SCHEMA_VERSION_V3 = "3";
     private static final TextMapSetter<ProducerRecord<String, String>> KAFKA_HEADER_SETTER =
             (record, key, value) -> {
                 if (record != null && key != null && value != null) {
@@ -66,7 +67,7 @@ public class ReactiveKafkaPaymentEventPublisher implements PaymentEventPublisher
                 payment.paymentId().toString(),
                 objectMapper.writeValueAsString(payment));
         record.headers().add("correlation-id", bytes(correlationId));
-        record.headers().add("schema-version", bytes(SCHEMA_VERSION));
+        record.headers().add("schema-version", bytes(payment.riskContext() == null ? SCHEMA_VERSION_V2 : SCHEMA_VERSION_V3));
         record.headers().add("event-type", bytes("PAYMENT_INGESTED"));
         record.headers().add("ingested-at", bytes(Instant.now(clock).toString()));
         GlobalOpenTelemetry.getPropagators()

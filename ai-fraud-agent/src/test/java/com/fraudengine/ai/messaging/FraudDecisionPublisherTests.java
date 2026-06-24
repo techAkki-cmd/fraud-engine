@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -34,6 +35,8 @@ class FraudDecisionPublisherTests {
         PaymentPayload payment = payment();
         FraudEvaluationResult result = new FraudEvaluationResult(
                 FraudDecision.SAFE,
+                0,
+                List.of(),
                 "Low risk",
                 "mock-ai",
                 "score=n/a",
@@ -51,18 +54,44 @@ class FraudDecisionPublisherTests {
         assertThat(header(record, "schema-version")).isEqualTo("2");
         assertThat(header(record, "event-type")).isEqualTo("PAYMENT_INGESTED");
         assertThat(header(record, "fraud-decision")).isEqualTo("SAFE");
+        assertThat(header(record, "risk-score")).isEqualTo("0");
         assertThat(header(record, "fraud-reason")).isEqualTo("Low risk");
         assertThat(header(record, "fraud-model")).isEqualTo("mock-ai");
     }
 
     @Test
-    void publishesFraudPaymentToBlocked() {
+    void publishesReviewPaymentToReviewTopic() {
         KafkaTemplate<String, String> kafkaTemplate = org.mockito.Mockito.mock(KafkaTemplate.class);
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(CompletableFuture.completedFuture(null));
         FraudDecisionPublisher publisher = new FraudDecisionPublisher(kafkaTemplate, Duration.ofSeconds(1));
 
         publisher.publish(sourceRecord(), new DecodedPayment(payment(), "corr-123"), new FraudEvaluationResult(
-                FraudDecision.FRAUD,
+                FraudDecision.REVIEW,
+                55,
+                List.of("+30 amount", "+25 geo distance"),
+                "Requires step-up",
+                "mock-ai",
+                "moderate-risk",
+                Instant.parse("2024-01-01T00:00:02Z")));
+
+        ArgumentCaptor<ProducerRecord<String, String>> captor = ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaTemplate).send(captor.capture());
+        assertThat(captor.getValue().topic()).isEqualTo(PaymentTopics.PAYMENT_REVIEW);
+        assertThat(header(captor.getValue(), "fraud-decision")).isEqualTo("REVIEW");
+        assertThat(header(captor.getValue(), "risk-score")).isEqualTo("55");
+        assertThat(header(captor.getValue(), "risk-rules")).contains("+30 amount");
+    }
+
+    @Test
+    void publishesBlockedPaymentToBlocked() {
+        KafkaTemplate<String, String> kafkaTemplate = org.mockito.Mockito.mock(KafkaTemplate.class);
+        when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(CompletableFuture.completedFuture(null));
+        FraudDecisionPublisher publisher = new FraudDecisionPublisher(kafkaTemplate, Duration.ofSeconds(1));
+
+        publisher.publish(sourceRecord(), new DecodedPayment(payment(), "corr-123"), new FraudEvaluationResult(
+                FraudDecision.BLOCK,
+                90,
+                List.of("+50 flagged destination"),
                 "Digital wallet velocity",
                 "mock-ai",
                 "velocity",
@@ -71,7 +100,7 @@ class FraudDecisionPublisherTests {
         ArgumentCaptor<ProducerRecord<String, String>> captor = ArgumentCaptor.forClass(ProducerRecord.class);
         verify(kafkaTemplate).send(captor.capture());
         assertThat(captor.getValue().topic()).isEqualTo(PaymentTopics.PAYMENT_BLOCKED);
-        assertThat(header(captor.getValue(), "fraud-decision")).isEqualTo("FRAUD");
+        assertThat(header(captor.getValue(), "fraud-decision")).isEqualTo("BLOCK");
     }
 
     private static ConsumerRecord<String, String> sourceRecord() {
@@ -97,7 +126,8 @@ class FraudDecisionPublisherTests {
                 new java.math.BigDecimal("125.25"),
                 "USD",
                 PaymentMethod.CARD,
-                Instant.parse("2024-01-01T00:00:00Z"));
+                Instant.parse("2024-01-01T00:00:00Z"),
+                null);
     }
 
     private static String header(ProducerRecord<String, String> record, String name) {

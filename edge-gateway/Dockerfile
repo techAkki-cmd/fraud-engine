@@ -5,15 +5,21 @@ WORKDIR /workspace
 
 COPY pom.xml .
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn --batch-mode dependency:go-offline
+    for attempt in 1 2 3; do \
+      mvn --batch-mode --no-transfer-progress -Dmaven.wagon.http.retryHandler.count=5 dependency:go-offline && break; \
+      if [ "$attempt" = "3" ]; then exit 1; fi; \
+      find /root/.m2/repository -name "*.lastUpdated" -delete; \
+      sleep 5; \
+    done
 
 COPY src ./src
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn --batch-mode clean package -DskipTests
+    mvn --batch-mode --no-transfer-progress clean package -DskipTests
 
 FROM eclipse-temurin:21-jre-alpine AS runtime
 
-RUN apk add --no-cache curl \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache curl \
     && addgroup --system --gid 10001 spring \
     && adduser --system --uid 10001 --ingroup spring --home /app spring
 
