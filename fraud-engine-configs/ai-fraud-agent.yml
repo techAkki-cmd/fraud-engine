@@ -16,7 +16,8 @@ spring:
   ai:
     model:
       chat: google-genai
-      embedding: google-genai
+      embedding:
+        text: google-genai
     google:
       genai:
         api-key: ${GEMINI_API_KEY:}
@@ -27,8 +28,11 @@ spring:
             temperature: 0.0
             max-output-tokens: 512
         embedding:
-          options:
-            model: ${GEMINI_EMBEDDING_MODEL:text-embedding-004}
+          api-key: ${GEMINI_API_KEY:}
+          text:
+            options:
+              dimensions: 768
+              model: ${GEMINI_EMBEDDING_MODEL:gemini-embedding-001}
     vectorstore:
       pgvector:
         initialize-schema: true
@@ -69,6 +73,7 @@ app:
   seed-mock-data: ${FRAUD_AGENT_SEED_MOCK_DATA:false}
   ai:
     provider-name: ${FRAUD_AGENT_AI_PROVIDER_NAME:google-genai}
+    model-call-enabled: ${FRAUD_AGENT_MODEL_CALL_ENABLED:true}
     decision-timeout: ${FRAUD_AGENT_DECISION_TIMEOUT:20s}
     publish-timeout: ${FRAUD_AGENT_PUBLISH_TIMEOUT:10s}
     processing-lease: ${FRAUD_AGENT_PROCESSING_LEASE:2m}
@@ -91,7 +96,8 @@ spring:
   ai:
     model:
       chat: none
-      embedding: none
+      embedding:
+        text: none
     vectorstore:
       pgvector:
         initialize-schema: false

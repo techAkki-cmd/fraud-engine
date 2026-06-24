@@ -4,6 +4,12 @@ server:
 spring:
   main:
     web-application-type: reactive
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${EDGE_GATEWAY_JWT_ISSUER_URI}
+          jwk-set-uri: ${EDGE_GATEWAY_JWT_JWK_SET_URI}
   lifecycle:
     timeout-per-shutdown-phase: 20s
   cloud:
@@ -30,6 +36,17 @@ spring:
         nodes: ${REDIS_SENTINEL_NODES:localhost:26379,localhost:26380,localhost:26381}
         password: ${REDIS_PASSWORD:}
   kafka:
+    consumer:
+      group-id: ${EDGE_GATEWAY_STREAM_GROUP_ID:edge-gateway-stream-group}
+      enable-auto-commit: false
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        max.poll.records: 1
+        isolation.level: read_committed
+    listener:
+      ack-mode: manual_immediate
     producer:
       acks: all
       compression-type: zstd
@@ -49,6 +66,8 @@ fraud-engine:
     requested-tokens: ${PAYMENT_RATE_LIMIT_REQUESTED_TOKENS:1}
   kafka:
     publish-timeout: ${PAYMENT_PUBLISH_TIMEOUT:12s}
+  stream:
+    group-id: ${EDGE_GATEWAY_STREAM_GROUP_ID:edge-gateway-stream-group}
 
 management:
   endpoints:

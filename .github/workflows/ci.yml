@@ -41,11 +41,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: verify
     env:
-      POSTGRES_DB: fraud_engine
-      POSTGRES_USER: fraud_engine_app
-      POSTGRES_PASSWORD: ci_postgres_password
+      FRAUD_ENGINE_POSTGRES_DB: fraud_engine
+      FRAUD_ENGINE_POSTGRES_USER: fraud_engine_app
+      FRAUD_ENGINE_POSTGRES_PASSWORD: ci_postgres_password
       REDIS_PASSWORD: ci_redis_password
       GEMINI_API_KEY: ci_mock_key
+      VAULT_TOKEN: root
+      EDGE_GATEWAY_JWT_ISSUER_URI: http://localhost:8080/realms/fraud-engine
+      EDGE_GATEWAY_JWT_JWK_SET_URI: http://localhost:8080/realms/fraud-engine/protocol/openid-connect/certs
       AI_FRAUD_AGENT_PROFILES: mock-ai
       CONFIG_REPO_GIT_URI: https://github.com/example/fraud-engine-configs.git
       CONFIG_REPO_USERNAME: ci-placeholder
@@ -61,4 +64,59 @@ jobs:
         run: docker compose config --quiet
 
       - name: Build service images
-        run: docker compose build config-server edge-gateway ai-fraud-agent ledger-service
+        run: docker compose build config-server edge-gateway ai-fraud-agent ledger-service risk-ops-dashboard
+
+      - name: Scan config-server image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scanners: vuln
+          image-ref: fraud-engine/config-server:phase-5.5
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          format: table
+          exit-code: "1"
+          timeout: 15m
+
+      - name: Scan edge-gateway image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scanners: vuln
+          image-ref: fraud-engine/edge-gateway:phase-2
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          format: table
+          exit-code: "1"
+          timeout: 15m
+
+      - name: Scan ai-fraud-agent image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scanners: vuln
+          image-ref: fraud-engine/ai-fraud-agent:phase-4
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          format: table
+          exit-code: "1"
+          timeout: 15m
+
+      - name: Scan ledger-service image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scanners: vuln
+          image-ref: fraud-engine/ledger-service:phase-3
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          format: table
+          exit-code: "1"
+          timeout: 15m
+
+      - name: Scan risk-ops-dashboard image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scanners: vuln
+          image-ref: fraud-engine/risk-ops-dashboard:phase-6.5
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          format: table
+          exit-code: "1"
+          timeout: 15m

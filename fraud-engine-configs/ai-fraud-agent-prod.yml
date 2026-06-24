@@ -1,0 +1,36 @@
+spring:
+  ai:
+    model:
+      chat: google-genai
+      embedding:
+        text: google-genai
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY}
+        chat:
+          options:
+            model: ${GEMINI_CHAT_MODEL:gemini-2.0-flash}
+            response-mime-type: application/json
+            temperature: 0.0
+            max-output-tokens: 512
+        embedding:
+          api-key: ${GEMINI_API_KEY}
+          text:
+            options:
+              dimensions: 768
+              model: ${GEMINI_EMBEDDING_MODEL:gemini-embedding-001}
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        schema-name: public
+        table-name: fraud_profile_vectors
+        dimensions: 768
+        distance-type: COSINE_DISTANCE
+        index-type: HNSW
+        remove-existing-vector-store-table: false
+        schema-validation: false
+
+app:
+  ai:
+    provider-name: ${FRAUD_AGENT_AI_PROVIDER_NAME:google-genai}
+    model-call-enabled: ${FRAUD_AGENT_MODEL_CALL_ENABLED:true}

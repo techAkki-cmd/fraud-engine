@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="false">
+    <property name="LOG_DATE_PATTERN" value="yyyy-MM-dd'T'HH:mm:ss.SSSXXX"/>
+    <property name="PII_REDACTED_MESSAGE" value="%replace(%replace(%replace(%msg){'\b(acct[-_])[A-Za-z0-9]{1,56}([A-Za-z0-9]{4})\b','$1*****$2'}){'\b((?:\d[ -]?){8,15})(\d{4})\b','****$2'}){'\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{0,63}@([A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24})\b','$1*****@$2'}"/>
+    <property name="PII_REDACTED_EXCEPTION" value="%replace(%replace(%replace(%ex){'\b(acct[-_])[A-Za-z0-9]{1,56}([A-Za-z0-9]{4})\b','$1*****$2'}){'\b((?:\d[ -]?){8,15})(\d{4})\b','****$2'}){'\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{0,63}@([A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24})\b','$1*****@$2'}"/>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>%d{${LOG_DATE_PATTERN}} %-5level [%thread] %logger{40} traceId=%X{traceId:-} spanId=%X{spanId:-} - ${PII_REDACTED_MESSAGE}%n${PII_REDACTED_EXCEPTION}</pattern>
+        </encoder>
+    </appender>
+
+    <root level="${LOG_LEVEL_ROOT:-INFO}">
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>

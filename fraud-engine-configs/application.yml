@@ -5,9 +5,9 @@ spring:
   lifecycle:
     timeout-per-shutdown-phase: 30s
   datasource:
-    url: ${JDBC_DATABASE_URL:jdbc:postgresql://localhost:5432/${POSTGRES_DB:fraud_engine}}
-    username: ${POSTGRES_USER:fraud_engine_app}
-    password: ${POSTGRES_PASSWORD}
+    url: ${SPRING_DATASOURCE_URL:${JDBC_DATABASE_URL:jdbc:postgresql://localhost:5432/${POSTGRES_DB:fraud_engine}}}
+    username: ${SPRING_DATASOURCE_USERNAME:${POSTGRES_USER:fraud_engine_app}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${POSTGRES_PASSWORD}}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     admin:
@@ -49,3 +49,23 @@ management:
       probes:
         enabled: true
       show-details: never
+---
+spring:
+  config:
+    activate:
+      on-profile: kafka-sasl
+  kafka:
+    properties:
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_PLAINTEXT}
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-512}
+      sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username="${KAFKA_SASL_USERNAME}" password="${KAFKA_SASL_PASSWORD}";
+    consumer:
+      properties:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_PLAINTEXT}
+        sasl.mechanism: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-512}
+        sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username="${KAFKA_SASL_USERNAME}" password="${KAFKA_SASL_PASSWORD}";
+    producer:
+      properties:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_PLAINTEXT}
+        sasl.mechanism: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-512}
+        sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username="${KAFKA_SASL_USERNAME}" password="${KAFKA_SASL_PASSWORD}";
